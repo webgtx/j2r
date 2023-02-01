@@ -2,6 +2,7 @@ import requests
 import json
 from datetime import date, datetime
 from os import environ
+import re
 
 from requests.api import request
 
@@ -22,22 +23,28 @@ except:
     print("You must execute enviroment variable setter script")
     exit(1)
 
-res = requests.post(
-        redmine_url,
+redmine_issues = requests.get(
+        redmine_url + "issues.json",
         auth = (redmine_username, redmine_password),
-        headers={"Content-Type": "application/json"},
-        data = json.dumps({
-            "time_entry": {
-                    "issue_id": "1968",
-                    "spent_on": datetime.now().strftime("%G-%m-%d"),
-                    "hours": 2,
-                    "comments": "Jounralctl logs inspect on stage instance"
-                }
-            } 
-        ))
+        params = {"limit": 100}
+        )
 
-print(res.json(), res.status_code)
 
+#try:
+#    print(redmine_issues.json())
+#except:
+#    print(redmine_issues.headers)
+
+def issue_filter(project, mask):
+    for issue in redmine_issues.json()["issues"]:
+        if issue["project"]["name"] == project:
+            subject_pattern = re.search(mask, issue["subject"])
+            if subject_pattern:
+                return issue["id"]
+
+print(issue_filter("MthMR", "AWS"))
+    
+    
 
 def count_worklogs():
     global hours_summury
@@ -75,6 +82,7 @@ def count_worklogs():
     for issue_id in jira_issue_ids:
         # Jira API endpoint for worklogs
         jira_worklogs_url = f"https://{jira_origin}/rest/api/2/issue/{issue_id}/worklog"
+        jira_issues_url = f"https://{jira_origin}/rest/api/2/issue/"
     
         # Get worklogs for the current issue
         jira_response = requests.get(
@@ -98,9 +106,35 @@ def count_worklogs():
             time_spent_hours = time_spent_seconds / 3600
             
             if started_at.month == 1:
-                print(issue_id, author, started_at.month, time_spent_hours, comments)
-                hours_summury += int(time_spent_hours)
-                
-# count_worklogs()
+                issue_title = requests.get(
+                        jira_issues_url + issue_id,
+                        auth=(jira_username, jira_apikey)
+                        )
+                print("\n",issue_id, author, started_at.month, time_spent_hours, comments, " | ", issue_title.json()["fields"]["summary"])
+                print() 
 
-# print("Summury hours = ", hours_summury)
+                hours_summury += int(time_spent_hours)
+                redmine_issue_id = issue_filter("MthMR", issue_title.json()["fields"]["summary"])
+                
+                res = requests.post(
+                        redmine_url + "time_entries.json",
+                        auth = (redmine_username, redmine_password),
+                        headers={"Content-Type": "application/json"},
+                        data = json.dumps({
+                            "time_entry": {
+                                    "issue_id": redmine_issue_id,
+                                    "spent_on": started_at.strftime("%G-%m-%d"),
+                                    "hours": time_spent_hours,
+                                    "comments": comments 
+                                }
+                            } 
+                        ))
+                
+                try:
+                    print(res.json(), res.status_code)
+                except:
+                    print("ERROR", res.headers)
+                
+count_worklogs()
+
+print("Summury hours = ", hours_summury)
